@@ -1,93 +1,71 @@
 #!/bin/bash
 
-MIN_LENGTH=8
+validar_password() {
+  local pass=$1
 
-function validar_password() {
-    local pass=$1
-    if [[ ${#pass} -lt $MIN_LENGTH ]]; then
-        echo "Error: La contraseña debe tener al menos $MIN_LENGTH caracteres."
-        return 1
-    fi
-    if [[ ! "$pass" =~ [A-Z] ]]; then echo "Error: Falta una mayúscula."; return 1; fi
-    if [[ ! "$pass" =~ [a-z] ]]; then echo "Error: Falta una minúscula."; return 1; fi
-    if [[ ! "$pass" =~ [0-9] ]]; then echo "Error: Falta un número."; return 1; fi
-    return 0
+  if [ ${#pass} -lt $MIN_LONGITUD ]; then
+    echo "Error: La contraseña debe tener al menos $MIN_LONGITUD caracteres."
+    return 1
+  fi
+  if [[ ! "$pass" =~ [A-Z] ]]; then
+    echo "Error: La contraseña debe incluir al menos una mayúscula."
+    return 1
+  fi
+  if [[ ! "$pass" =~ [0-9] ]]; then
+    echo "Error: La contraseña debe incluir al menos un número."
+    return 1
+  fi
+  return 0
 }
 
-if [[ $EUID -ne 0 ]]; then
-   echo "Error: Este script debe ejecutarse con sudo o como root." 
-   exit 1
+if [ "$EUID" -ne 0 ]; then
+  echo "Por favor, ejecuta este script como root o usando sudo."
+  exit 1
 fi
 
-echo "=========================================="
-echo "    GESTOR DE USUARIOS PRO (CUOTAS + SUDO)"
-echo "==========================================
+echo "--- Generador de Usuarios Nuevo ---"
 
-read -p "Introduce el nombre de usuario: " USERNAME
-if id "$USERNAME" &>/dev/null; then
-    echo "El usuario ya existe."
-    exit 1
+read -p "Introduce el nombre del nuevo usuario: " NUEVO_USER
+
+if id "$NUEVO_USER" &>/dev/null; then
+  echo "El usuario '$NUEVO_USER' ya existe en el sistema."
+  exit 1
 fi
-read -p "Introduce el nombre completo: " FULL_NAME
 
 while true; do
-    read -s -p "Introduce la contraseña: " PASSWORD; echo ""
-    read -s -p "Confirma la contraseña: " PASSWORD_CONFIRM; echo ""
-    if [ "$PASSWORD" != "$PASSWORD_CONFIRM" ]; then
-        echo "Las contraseñas no coinciden."
-        continue
-    fi
-    if validar_password "$PASSWORD"; then break; fi
+  read -sp "Introduce la contraseña para $NUEVO_USER: " PASS_1
+  echo
+  read -sp "Confirma la contraseña: " PASS_2
+  echo
+
+  if [ "$PASS_1" != "$PASS_2" ]; then
+    echo "Las contraseñas no coinciden. Inténtalo de nuevo."
+    continue
+  fi
+
+  if validar_password "$PASS_1"; then
+    break
+  else
+    echo "Intenta con una contraseña más fuerte."
+  fi
 done
 
-read -p "¿Deseas asignar cuotas de disco? (s/n): " ASIGNAR_CUOTA
-if [[ "$ASIGNAR_CUOTA" =~ ^[Ss]$ ]]; then
-    read -p "Límite Soft (KB): " Q_SOFT
-    read -p "Límite Hard (KB): " Q_HARD
-    read -p "¿Cambiar periodo de gracia? (s/n): " CAMBIAR_GRACIA
-    if [[ "$CAMBIAR_GRACIA" =~ ^[Ss]$ ]]; then
-        read -p "Periodo (ej: 7days): " GRACE_PERIOD
-    fi
-fi
+read -p "Introduce el nombre completo del usuario: " NOMBRE_REAL
 
-read -p "¿El usuario podrá usar sudo? (s/n): " QUIERE_SUDO
-if [[ "$QUIERE_SUDO" =~ ^[Ss]$ ]]; then
-    echo "--- Configuración de Sudo ---"
-    echo "1) Todos los comandos (ALL)"
-    echo "2) Comandos específicos (separados por coma, ej: /usr/bin/apt, /usr/bin/systemctl)"
-    read -p "Selecciona una opción (1 o 2): " OP_SUDO
-    
-    if [ "$OP_SUDO" == "1" ]; then
-        SUDO_CMDS="ALL"
-    else
-        read -p "Introduce los comandos (ruta completa): " SUDO_CMDS
-    fi
-fi
+echo "Creando el usuario '$NUEVO_USER'..."
 
-echo "Procesando..."
+useradd -m -c "$NOMBRE_REAL" -s /bin/bash "$NUEVO_USER"
 
-useradd -m -c "$FULL_NAME" -s /bin/bash "$USERNAME"
-echo "$USERNAME:$PASSWORD" | chpasswd
+echo "$NUEVO_USER:$PASS_1" | chpasswd
 
 if [ $? -eq 0 ]; then
-    # Aplicar Cuotas
-    if [[ "$ASIGNAR_CUOTA" =~ ^[Ss]$ ]]; then
-        setquota -u "$USERNAME" "$Q_SOFT" "$Q_HARD" 0 0 /home
-        [ ! -z "$GRACE_PERIOD" ] && setquota -t "$GRACE_PERIOD" "$GRACE_PERIOD" /home
-    fi
-
-    # Aplicar Sudo
-    if [[ "$QUIERE_SUDO" =~ ^[Ss]$ ]]; then
-        # Creamos un archivo individual en sudoers.d
-        SUDO_FILE="/etc/sudoers.d/user_$USERNAME"
-        echo "$USERNAME ALL=(ALL:ALL) $SUDO_CMDS" > "$SUDO_FILE"
-        chmod 440 "$SUDO_FILE" # Permisos estrictos obligatorios para sudoers
-        echo "Permisos sudo configurados en $SUDO_FILE"
-    fi
-
-    echo "------------------------------------------"
-    echo "¡Usuario '$USERNAME' creado exitosamente!"
+  echo "--------------------------------------------------"
+  echo "¡Éxito! El usuario $NUEVO_USER ha sido creado."
+  echo "Directorio personal: /home/$NUEVO_USER"
+  echo "--------------------------------------------------"
 else
-    echo "Ocurrió un error inesperado."
-    exit 1
+  echo "Hubo un error al procesar la creación del usuario."
+  exit 1
 fi
+
+exit 0
