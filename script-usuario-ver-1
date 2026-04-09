@@ -1,0 +1,86 @@
+#!/bin/bash
+
+MIN_LENGTH=8
+
+function validar_password() {
+  local pass=$1
+  if [[ ${#pass} -lt $MIN_LENGTH ]]; then
+    echo "Error: La contraseña debe tener al menos $MIN_LENGTH caracteres."
+    return 1
+  fi
+  if [[ ! "$pass" =~ [A-Z] ]]; then
+    echo "Error: Falta una mayúscula."
+    return 1
+  fi
+  if [[ ! "$pass" =~ [a-z] ]]; then
+    echo "Error: Falta una minúscula."
+    return 1
+  fi
+  if [[ ! "$pass" =~ [0-9] ]]; then
+    echo "Error: Falta un número."
+    return 1
+  fi
+  return 0
+}
+
+if [[ $EUID -ne 0 ]]; then
+  echo "Este script debe ejecutarse como root (sudo)."
+  exit 1
+fi
+
+echo "=========================================="
+echo "    GESTOR DE USUARIOS CON CUOTAS"
+echo "=========================================="
+
+read -p "Introduce el nombre de usuario: " USERNAME
+if id "$USERNAME" &>/dev/null; then
+  echo "El usuario ya existe."
+  exit 1
+fi
+
+read -p "Introduce el nombre completo: " FULL_NAME
+
+while true; do
+  read -s -p "Introduce la contraseña: " PASSWORD
+  echo ""
+  read -s -p "Confirma la contraseña: " PASSWORD_CONFIRM
+  echo ""
+  if [ "$PASSWORD" != "$PASSWORD_CONFIRM" ]; then
+    echo "Las contraseñas no coinciden."
+    continue
+  fi
+  if validar_password "$PASSWORD"; then break; fi
+done
+
+read -p "¿Deseas asignar cuotas de disco a este usuario? (s/n): " ASIGNAR_CUOTA
+
+if [[ "$ASIGNAR_CUOTA" =~ ^[Ss]$ ]]; then
+  echo "--- Configuración de Cuota (en KB, ej: 102400 para 100MB) ---"
+  read -p "Límite Soft (aviso): " Q_SOFT
+  read -p "Límite Hard (estricto): " Q_HARD
+
+  read -p "¿Deseas cambiar el periodo de gracia? (s/n): " CAMBIAR_GRACIA
+  if [[ "$CAMBIAR_GRACIA" =~ ^[Ss]$ ]]; then
+    read -p "Introduce el periodo de gracia (ej: 7days, 24hours): " GRACE_PERIOD
+  fi
+fi
+
+echo "Creando usuario..."
+useradd -m -c "$FULL_NAME" -s /bin/bash "$USERNAME"
+echo "$USERNAME:$PASSWORD" | chpasswd
+
+if [ $? -eq 0 ]; then
+  if [[ "$ASIGNAR_CUOTA" =~ ^[Ss]$ ]]; then
+    echo "Asignando cuotas..."
+    setquota -u "$USERNAME" "$Q_SOFT" "$Q_HARD" 0 0 /home
+    if [ ! -z "$GRACE_PERIOD" ]; then
+      setquota -t "$GRACE_PERIOD" "$GRACE_PERIOD" /home
+      echo "Periodo de gracia actualizado a $GRACE_PERIOD."
+    fi
+  fi
+  echo "------------------------------------------"
+  echo "¡Éxito! Usuario '$USERNAME' creado correctamente."
+else
+  echo "Error en la creación."
+  exit 1
+fi
